@@ -1,20 +1,19 @@
-const CACHE_NAME = "unit-calc-v3"; // 更新時はここを変更
+const CACHE_NAME = "unit-calc-v4"; // バージョンを上げてください
 const ASSETS = [
-    "./",
     "./index.html",
     "./manifest.json",
     "./icon-192.png",
     "./icon-512.png"
 ];
 
-// インストール時にキャッシュ
 self.addEventListener("install", (event) => {
+    // インストール時に即座に有効化
+    self.skipWaiting();
     event.waitUntil(
         caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
     );
 });
 
-// 古いキャッシュを削除
 self.addEventListener("activate", (event) => {
     event.waitUntil(
         caches.keys().then((keys) => {
@@ -26,9 +25,11 @@ self.addEventListener("activate", (event) => {
     );
 });
 
-// フェッチ（ネットワーク優先、失敗したらキャッシュ）
+// オフライン対応：キャッシュがあればそれを返し、なければネットワークへ
 self.addEventListener("fetch", (event) => {
     event.respondWith(
-        fetch(event.request).catch(() => caches.match(event.request))
+        caches.match(event.request).then((response) => {
+            return response || fetch(event.request);
+        })
     );
 });
