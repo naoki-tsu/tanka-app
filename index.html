@@ -1,302 +1,140 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>円形ルーレット抽選</title>
-
-<!-- ★ PWA manifest -->
-<link rel="manifest" href="manifest.json">
-
-<!-- ★ iOS用アイコン（任意） -->
-<link rel="apple-touch-icon" href="icon-192.png">
-
-<style>
-  body { font-family: sans-serif; padding: 20px; background: #fafafa; }
-  h2 { margin-bottom: 10px; }
-  textarea {
-    width: 100%; height: 120px;
-    padding: 12px; font-size: 18px;
-    border-radius: 10px; border: 1px solid #ddd;
-    box-sizing: border-box;
-  }
-  button {
-    width: 100%; padding: 14px;
-    margin-top: 10px; font-size: 18px;
-    border: none; border-radius: 10px;
-    background: #4f46e5; color: #fff;
-    font-weight: bold;
-  }
-  #canvasWrap {
-    margin-top: 20px;
-    display: flex; justify-content: center;
-  }
-  #result {
-    margin-top: 20px; font-size: 28px;
-    text-align: center; font-weight: bold;
-    min-height: 40px;
-  }
-  #confettiCanvas {
-    position: fixed;
-    left: 0; top: 0;
-    width: 100%; height: 100%;
-    pointer-events: none;
-    z-index: 9999;
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>単価計算アプリ</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#007aff">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <style>
+        body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; padding: 16px; color: #333; }
+        .app { max-width: 420px; margin: 0 auto; }
+        h1 { text-align: center; color: #007aff; font-size: 1.5rem; }
+        .card { background: #fff; border-radius: 16px; padding: 20px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .tabs { display: flex; margin-bottom: 20px; border-radius: 12px; background: #e5e5ea; padding: 4px; }
+        .tab { flex: 1; text-align: center; padding: 10px 4px; font-size: 14px; border-radius: 8px; cursor: pointer; transition: 0.2s; }
+        .tab.active { background: #fff; color: #007aff; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        label { display: block; margin-top: 12px; font-size: 13px; color: #666; font-weight: 600; }
+        input { width: 100%; padding: 14px; margin-top: 6px; font-size: 18px; border-radius: 10px; border: 1px solid #ddd; box-sizing: border-box; appearance: none; }
+        input:focus { border-color: #007aff; outline: none; box-shadow: 0 0 0 2px rgba(0,122,255,0.2); }
+        .row { display: flex; gap: 10px; margin-top: 24px; }
+        button { flex: 1; padding: 14px; font-size: 16px; border-radius: 12px; border: none; color: #fff; font-weight: bold; cursor: pointer; }
+        button:active { opacity: 0.8; }
+        #calcBtn { background: #007aff; }
+        #clearBtn { background: #8e8e93; }
+        #result { margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 10px; min-height: 28px; text-align: center; font-size: 1.2rem; font-weight: bold; color: #007aff; }
+        .note { margin-top: 12px; font-size: 12px; color: #888; text-align: center; line-height: 1.4; }
+    </style>
 </head>
 <body>
+    <div class="app">
+        <h1>単価計算</h1>
+        <div class="card">
+            <div class="tabs">
+                <div class="tab" id="tab-ex" onclick="setMode('ex')">税抜→税込</div>
+                <div class="tab" id="tab-in" onclick="setMode('in')">税込→税抜</div>
+                <div class="tab active" id="tab-unit" onclick="setMode('unit')">単純単価</div>
+            </div>
 
-<h2>円形ルーレット抽選</h2>
+            <label>数量（個数・グラムなど）</label>
+            <input type="number" id="qty" inputmode="decimal" placeholder="例: 10">
 
-<textarea id="items" placeholder="例：A, B, C または A/B/C または 改行区切り"></textarea>
-<button onclick="startRoulette()">抽選する</button>
+            <label>合計金額</label>
+            <input type="number" id="amount" inputmode="numeric" placeholder="例: 2500">
 
-<div id="canvasWrap">
-  <canvas id="wheel" width="300" height="300"></canvas>
-</div>
+            <div id="taxSection" style="display: none;">
+                <label id="taxRateLabel">税率（%）</label>
+                <input type="number" id="taxRate" inputmode="numeric" value="10">
+            </div>
 
-<canvas id="confettiCanvas"></canvas>
+            <div class="row">
+                <button id="calcBtn" onclick="calc()">計算する</button>
+                <button id="clearBtn" onclick="clearAll()">クリア</button>
+            </div>
 
-<div id="result"></div>
+            <div id="result"></div>
+            <div class="note" id="modeNote"></div>
+        </div>
+    </div>
 
-<script>
-/* ★ Service Worker 登録 */
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("sw.js");
-}
+    <script>
+        // 初期のモード変数をunitに設定
+        let mode = "unit";
 
-/* -------------------------
-   円形ルーレット
-------------------------- */
-const canvas = document.getElementById("wheel");
-const ctx = canvas.getContext("2d");
-let angle = 0;
-let spinning = false;
-let sectors = [];
-let lastSectorIndex = -1; // カタカタ音用
+        function setMode(m) {
+            mode = m;
+            // 全てのタブからactiveを除去し、クリックされたものに付与
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(`tab-${m}`).classList.add('active');
+            
+            const taxSection = document.getElementById("taxSection");
+            const note = document.getElementById("modeNote");
 
-const colors = ["#ef4444","#f97316","#f59e0b","#10b981","#06b6d4","#3b82f6","#8b5cf6","#ec4899"];
+            // 表示の切り替え
+            if (mode === "unit") {
+                taxSection.style.display = "none";
+                note.innerText = "単純に 金額 ÷ 数量 で単価を算出します。";
+            } else {
+                taxSection.style.display = "block";
+                note.innerText = mode === "ex" ? "入力された金額を税抜として、税込単価を算出します。" : "入力された金額を税込として、税抜単価を算出します。";
+            }
+            document.getElementById("result").innerText = "";
+        }
 
-function drawWheel() {
-  const total = sectors.length;
-  if (total === 0) return;
+        function calc() {
+            const qtyStr = document.getElementById("qty").value;
+            const amountStr = document.getElementById("amount").value;
+            const taxRate = parseFloat(document.getElementById("taxRate").value) || 0;
 
-  const arc = (2 * Math.PI) / total;
+            if (!qtyStr || !amountStr) {
+                document.getElementById("result").innerText = "数値を入力してください";
+                return;
+            }
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const qty = parseFloat(qtyStr);
+            const amount = parseFloat(amountStr);
 
-  sectors.forEach((item, i) => {
-    const start = angle + i * arc;
-    const end = start + arc;
+            if (qty === 0) {
+                document.getElementById("result").innerText = "数量に0は使用できません";
+                return;
+            }
 
-    ctx.beginPath();
-    ctx.moveTo(150, 150);
-    ctx.arc(150, 150, 140, start, end);
-    ctx.fillStyle = colors[i % colors.length];
-    ctx.fill();
-    ctx.closePath();
+            let resAmount = 0;
+            let label = "";
 
-    ctx.save();
-    ctx.translate(150, 150);
-    ctx.rotate(start + arc / 2);
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 18px sans-serif";
-    ctx.fillText(item, 130, 6);
-    ctx.restore();
-  });
+            if (mode === "ex") {
+                resAmount = (amount * (1 + taxRate / 100)) / qty;
+                label = "税込単価";
+            } else if (mode === "in") {
+                resAmount = (amount / (1 + taxRate / 100)) / qty;
+                label = "税抜単価";
+            } else {
+                resAmount = amount / qty;
+                label = "単価";
+            }
 
-  ctx.beginPath();
-  ctx.moveTo(150, 10);
-  ctx.lineTo(140, 30);
-  ctx.lineTo(160, 30);
-  ctx.fillStyle = "#333";
-  ctx.fill();
-}
+            // 桁区切りと小数点2位までのフォーマット
+            const formatted = resAmount.toLocaleString(undefined, { maximumFractionDigits: 2 });
+            document.getElementById("result").innerText = `${label}: ${formatted} 円`;
+        }
 
-function startRoulette() {
-  if (spinning) return;
+        function clearAll() {
+            document.getElementById("qty").value = "";
+            document.getElementById("amount").value = "";
+            document.getElementById("result").innerText = "";
+        }
 
-  const raw = document.getElementById("items").value;
-  sectors = raw
-    .split(/[\n,\/]/)
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
+        // --- ここが「初期化部分の修正」箇所です ---
+        // 起動時に 'unit' (単純単価) モードを呼び出す
+        setMode('unit');
 
-  if (sectors.length === 0) {
-    document.getElementById("result").textContent = "入力してください";
-    return;
-  }
-
-  drawWheel();
-
-  spinning = true;
-  let speed = 0.35 + Math.random() * 0.25;
-  const slowDown = 0.995;
-
-  function rotate() {
-    angle += speed;
-    speed *= slowDown;
-
-    drawWheel();
-    playTickSound(); // ← カタカタ音
-
-    if (speed < 0.002) {
-      spinning = false;
-      stopAtResult();
-      return;
-    }
-
-    requestAnimationFrame(rotate);
-  }
-
-  rotate();
-}
-
-function stopAtResult() {
-  const total = sectors.length;
-  const arc = (2 * Math.PI) / total;
-
-  const pointerAngle = (3 * Math.PI) / 2;
-
-  let adjusted = (pointerAngle - angle) % (2 * Math.PI);
-  if (adjusted < 0) adjusted += 2 * Math.PI;
-
-  const index = Math.floor(adjusted / arc);
-  const result = sectors[index];
-
-  document.getElementById("result").textContent = result;
-
-  // 🎉 紙吹雪
-  confettiBurst(window.innerWidth / 2, window.innerHeight / 3, 60);
-
-  // 🎵 チーン音
-  playDingSound();
-}
-
-/* -------------------------
-   効果音（WebAudio）
-------------------------- */
-function playTickSound() {
-  const total = sectors.length;
-  const arc = (2 * Math.PI) / total;
-  const pointerAngle = (3 * Math.PI) / 2;
-
-  let adjusted = (pointerAngle - angle) % (2 * Math.PI);
-  if (adjusted < 0) adjusted += 2 * Math.PI;
-
-  const index = Math.floor(adjusted / arc);
-
-  if (index !== lastSectorIndex) {
-    lastSectorIndex = index;
-
-    try {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "square";
-      osc.frequency.value = 900;
-      gain.gain.value = 0.0001;
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      const now = ctx.currentTime;
-      gain.gain.exponentialRampToValueAtTime(0.05, now + 0.01);
-      osc.start(now);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
-      osc.stop(now + 0.09);
-    } catch (e) {}
-  }
-}
-
-function playDingSound() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = 1200; // チーンっぽい高音
-    gain.gain.value = 0.0001;
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    gain.gain.exponentialRampToValueAtTime(0.2, now + 0.02);
-    osc.start(now);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
-    osc.stop(now + 0.42);
-  } catch (e) {}
-}
-
-/* -------------------------
-   紙吹雪エンジン（軽量）
-------------------------- */
-const confettiCanvas = document.getElementById("confettiCanvas");
-const confettiCtx = confettiCanvas.getContext("2d");
-let confettiParticles = [];
-let confettiRunning = false;
-
-function resizeCanvas() {
-  confettiCanvas.width = window.innerWidth;
-  confettiCanvas.height = window.innerHeight;
-}
-window.addEventListener("resize", resizeCanvas);
-resizeCanvas();
-
-function confettiBurst(x, y, count) {
-  const colors = ['#ef4444','#f97316','#f59e0b','#10b981','#06b6d4','#3b82f6','#8b5cf6','#ec4899'];
-
-  for (let i = 0; i < count; i++) {
-    confettiParticles.push({
-      x: x,
-      y: y,
-      vx: (Math.random() - 0.5) * 10,
-      vy: - (4 + Math.random() * 6),
-      size: 6 + Math.random() * 10,
-      rot: Math.random() * 360,
-      vr: (Math.random() - 0.5) * 12,
-      color: colors[Math.floor(Math.random() * colors.length)],
-      life: 60 + Math.random() * 60
-    });
-  }
-
-  if (!confettiRunning) {
-    confettiRunning = true;
-    requestAnimationFrame(confettiLoop);
-  }
-}
-
-function confettiLoop() {
-  confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
-
-  for (let i = confettiParticles.length - 1; i >= 0; i--) {
-    const p = confettiParticles[i];
-    p.life--;
-    p.vy += 0.18;
-    p.x += p.vx;
-    p.y += p.vy;
-    p.rot += p.vr;
-
-    confettiCtx.save();
-    confettiCtx.translate(p.x, p.y);
-    confettiCtx.rotate(p.rot * Math.PI / 180);
-    confettiCtx.fillStyle = p.color;
-    confettiCtx.fillRect(-p.size/2, -p.size/2, p.size, p.size * 0.6);
-    confettiCtx.restore();
-
-    if (p.life <= 0 || p.y > confettiCanvas.height + 50) {
-      confettiParticles.splice(i, 1);
-    }
-  }
-
-  if (confettiParticles.length > 0) {
-    requestAnimationFrame(confettiLoop);
-  } else {
-    confettiRunning = false;
-  }
-}
-</script>
-
+        // Service Workerの登録
+        if ("serviceWorker" in navigator) {
+            window.addEventListener("load", () => {
+                navigator.serviceWorker.register("service-worker.js");
+            });
+        }
+    </script>
 </body>
 </html>
